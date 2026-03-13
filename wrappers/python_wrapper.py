@@ -21,6 +21,20 @@ lib.solve_velocity.argtypes = [ctypes.POINTER(RelaxedIKS), ctypes.POINTER(ctypes
 lib.solve_velocity.restype = Opt
 lib.reset.argtypes = [ctypes.POINTER(RelaxedIKS)]
 
+# Shared joint API
+lib.has_shared_joints.argtypes = [ctypes.POINTER(RelaxedIKS)]
+lib.has_shared_joints.restype = ctypes.c_int
+lib.get_num_shared_joint_pairs.argtypes = [ctypes.POINTER(RelaxedIKS)]
+lib.get_num_shared_joint_pairs.restype = ctypes.c_int
+lib.get_shared_joint_pairs.argtypes = [ctypes.POINTER(RelaxedIKS)]
+lib.get_shared_joint_pairs.restype = Opt
+lib.enable_shared_joint_penalty.argtypes = [ctypes.POINTER(RelaxedIKS), ctypes.c_double]
+lib.enable_shared_joint_penalty.restype = None
+lib.enable_shared_joint_reduction.argtypes = [ctypes.POINTER(RelaxedIKS)]
+lib.enable_shared_joint_reduction.restype = None
+lib.validate_shared_joints.argtypes = [ctypes.POINTER(RelaxedIKS)]
+lib.validate_shared_joints.restype = Opt
+
 class RelaxedIKRust:
     def __init__(self, setting_file_path = None):
         '''
@@ -79,6 +93,51 @@ class RelaxedIKRust:
         for i in range(len(joint_state)):
             js_arr[i] = joint_state[i]
         lib.reset(self.obj, js_arr, len(js_arr))
+
+    # ---- Shared joint API ----
+
+    def has_shared_joints(self):
+        '''Returns True if the robot has shared joints between kinematic chains.'''
+        return lib.has_shared_joints(self.obj) != 0
+
+    def get_shared_joint_pairs(self):
+        '''
+        Returns a list of (idx_a, idx_b) tuples — pairs of indices into the
+        full joint-state vector that refer to the same physical joint.
+        '''
+        opt = lib.get_shared_joint_pairs(self.obj)
+        flat = [opt.data[i] for i in range(opt.length)]
+        return [(int(flat[i]), int(flat[i+1])) for i in range(0, len(flat), 2)]
+
+    def enable_shared_joint_penalty(self, weight=2000000.0):
+        '''
+        Approach 2.1: Add penalty terms that force shared joint variables to
+        stay aligned.  Cost per pair = weight * (x[a] - x[b])^2.
+
+        weight (float): penalty coefficient (default 2e6).
+                        Must be large enough to dominate position objectives
+                        (which total ~600 effective weight across chains).
+                        Typical range: 1e4 – 1e7.
+        '''
+        lib.enable_shared_joint_penalty(self.obj, weight)
+
+    def enable_shared_joint_reduction(self):
+        '''
+        Approach 2.2: Optimize in a reduced variable space where each physical
+        joint has exactly one optimization variable.  Shared joints are
+        guaranteed to be identical after solving.
+        '''
+        lib.enable_shared_joint_reduction(self.obj)
+
+    def validate_shared_joints(self):
+        '''
+        After solving, returns a list of absolute differences for each shared
+        joint pair (based on the current internal solution).
+        For Penalty mode, small nonzero values are expected.
+        For VariableReduction mode, values should be exactly 0.
+        '''
+        opt = lib.validate_shared_joints(self.obj)
+        return [opt.data[i] for i in range(opt.length)]
 
 if __name__ == '__main__':
     pass

@@ -169,6 +169,82 @@ pub unsafe extern "C" fn solve(ptr: *mut RelaxedIK, pos_goals: *const c_double, 
     Opt {data: ptr, length: len as c_int}
 }
 
+// ---- Shared joint API ----
+
+#[no_mangle]
+pub unsafe extern "C" fn has_shared_joints(ptr: *mut RelaxedIK) -> c_int {
+    let relaxed_ik = unsafe {
+        assert!(!ptr.is_null());
+        &*ptr
+    };
+    if relaxed_ik.vars.robot.has_shared_joints() { 1 } else { 0 }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn get_num_shared_joint_pairs(ptr: *mut RelaxedIK) -> c_int {
+    let relaxed_ik = unsafe {
+        assert!(!ptr.is_null());
+        &*ptr
+    };
+    relaxed_ik.vars.robot.shared_joint_pairs.len() as c_int
+}
+
+/// Returns the shared joint pairs as a flat array: [idx_a0, idx_b0, idx_a1, idx_b1, ...].
+#[no_mangle]
+pub unsafe extern "C" fn get_shared_joint_pairs(ptr: *mut RelaxedIK) -> Opt {
+    let relaxed_ik = unsafe {
+        assert!(!ptr.is_null());
+        &*ptr
+    };
+    let mut pairs_flat: Vec<f64> = Vec::new();
+    for &(a, b) in &relaxed_ik.vars.robot.shared_joint_pairs {
+        pairs_flat.push(a as f64);
+        pairs_flat.push(b as f64);
+    }
+    let ptr = pairs_flat.as_ptr();
+    let len = pairs_flat.len();
+    std::mem::forget(pairs_flat);
+    Opt { data: ptr, length: len as c_int }
+}
+
+/// Approach 2.1: Enable penalty-based shared joint alignment.
+#[no_mangle]
+pub unsafe extern "C" fn enable_shared_joint_penalty(ptr: *mut RelaxedIK, weight: c_double) {
+    let relaxed_ik = unsafe {
+        assert!(!ptr.is_null());
+        &mut *ptr
+    };
+    relaxed_ik.enable_shared_joint_penalty(weight);
+}
+
+/// Approach 2.2: Enable variable-reduction shared joint handling.
+#[no_mangle]
+pub unsafe extern "C" fn enable_shared_joint_reduction(ptr: *mut RelaxedIK) {
+    let relaxed_ik = unsafe {
+        assert!(!ptr.is_null());
+        &mut *ptr
+    };
+    relaxed_ik.enable_shared_joint_reduction();
+}
+
+/// Validate shared joints on the current solution (vars.xopt).
+/// Returns a flat array of absolute differences, one per shared joint pair.
+#[no_mangle]
+pub unsafe extern "C" fn validate_shared_joints(ptr: *mut RelaxedIK) -> Opt {
+    let relaxed_ik = unsafe {
+        assert!(!ptr.is_null());
+        &*ptr
+    };
+    let results = relaxed_ik.validate_shared_joints(&relaxed_ik.vars.xopt);
+    let diffs: Vec<f64> = results.iter().map(|r| r.3).collect();
+    let ptr = diffs.as_ptr();
+    let len = diffs.len();
+    std::mem::forget(diffs);
+    Opt { data: ptr, length: len as c_int }
+}
+
+// ---- end shared joint API ----
+
 fn solve_position_helper(relaxed_ik: &mut RelaxedIK, pos_goals: Vec<f64>, quat_goals: Vec<f64>,
                 tolerance: Vec<f64>) -> Vec<f64> {
 

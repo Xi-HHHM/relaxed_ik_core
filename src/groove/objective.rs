@@ -415,3 +415,51 @@ impl ObjectiveTrait for MatchEEQuatGoals {
         groove_loss(x_val, 0., 2, 0.1, 10.0, 2)
     }
 }
+
+
+/// Penalizes the difference between two optimization variables that should be equal.
+/// Used for approach 2.1: forcing shared joints across chains to stay aligned.
+///
+/// Cost = `weight * (x[a] - x[b])^2`.  The `weight` is stored on the struct
+/// and set directly from the user-facing API — no hidden internal multiplier.
+/// `weight_priors` in ObjectiveMaster is set to 1.0 so the user's weight is
+/// the sole control.
+pub struct SharedJointAlignment {
+    pub idx_a: usize,
+    pub idx_b: usize,
+    pub weight: f64,
+}
+impl SharedJointAlignment {
+    pub fn new(idx_a: usize, idx_b: usize, weight: f64) -> Self {
+        Self { idx_a, idx_b, weight }
+    }
+}
+impl ObjectiveTrait for SharedJointAlignment {
+    fn call(&self, x: &[f64], _v: &vars::RelaxedIKVars,
+            _frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
+        self.weight * (x[self.idx_a] - x[self.idx_b]).powi(2)
+    }
+    fn call_lite(&self, x: &[f64], _v: &vars::RelaxedIKVars,
+                 _ee_poses: &Vec<(nalgebra::Vector3<f64>, nalgebra::UnitQuaternion<f64>)>) -> f64 {
+        self.weight * (x[self.idx_a] - x[self.idx_b]).powi(2)
+    }
+    fn gradient(&self, x: &[f64], _v: &vars::RelaxedIKVars,
+                _frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> (f64, Vec<f64>) {
+        let diff = x[self.idx_a] - x[self.idx_b];
+        let obj = self.weight * diff.powi(2);
+        let mut grad = vec![0.0; x.len()];
+        grad[self.idx_a] = self.weight * 2.0 * diff;
+        grad[self.idx_b] = self.weight * -2.0 * diff;
+        (obj, grad)
+    }
+    fn gradient_lite(&self, x: &[f64], _v: &vars::RelaxedIKVars,
+                     _ee_poses: &Vec<(nalgebra::Vector3<f64>, nalgebra::UnitQuaternion<f64>)>) -> (f64, Vec<f64>) {
+        let diff = x[self.idx_a] - x[self.idx_b];
+        let obj = self.weight * diff.powi(2);
+        let mut grad = vec![0.0; x.len()];
+        grad[self.idx_a] = self.weight * 2.0 * diff;
+        grad[self.idx_b] = self.weight * -2.0 * diff;
+        (obj, grad)
+    }
+    fn gradient_type(&self) -> usize { 0 }
+}
