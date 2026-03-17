@@ -1,5 +1,22 @@
 use crate::groove::objective::*;
 use crate::groove::vars::RelaxedIKVars;
+use std::collections::HashMap;
+
+/// Controls verbosity of objective reports after each solve.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ObjectiveReportMode {
+    /// No objective reports (default).
+    Off,
+    /// One row per objective class (e.g., MatchEEPosiDoF, EachJointLimits).
+    Brief,
+    /// One row per objective instance (detailed).
+    Detailed,
+}
+
+/// Extract class name from objective name, e.g. "MatchEEPosiDoF[arm=0,axis=0]" -> "MatchEEPosiDoF".
+fn objective_class(name: &str) -> &str {
+    name.split('[').next().unwrap_or(name).trim()
+}
 
 pub struct ObjectiveMaster {
     pub objectives: Vec<Box<dyn ObjectiveTrait + Send>>,
@@ -218,5 +235,72 @@ impl ObjectiveMaster {
         }
 
         (f_0, grad)
+    }
+
+    /// Print objectives, weights, and residuals based on the given report mode.
+    pub fn print_objective_report(&self, x: &[f64], vars: &RelaxedIKVars, mode: ObjectiveReportMode) {
+        if mode == ObjectiveReportMode::Off {
+            return;
+        }
+
+        let mut total: f64 = 0.0;
+        let rows: Vec<(String, f64, f64, f64)> = if self.lite {
+            let poses = vars.robot.get_ee_pos_and_quat_immutable(x);
+            (0..self.objectives.len()).map(|i| {
+                let residual = self.objectives[i].call_lite(x, vars, &poses);
+                let weighted = self.weight_priors[i] * residual;
+                total += weighted;
+                (self.objectives[i].name(), self.weight_priors[i], residual, weighted)
+            }).collect()
+        } else {
+            let frames = vars.robot.get_frames_immutable(x);
+            (0..self.objectives.len()).map(|i| {
+                let residual = self.objectives[i].call(x, vars, &frames);
+                let weighted = self.weight_priors[i] * residual;
+                total += weighted;
+                (self.objectives[i].name(), self.weight_priors[i], residual, weighted)
+            }).collect()
+        };
+
+        match mode {
+            ObjectiveReportMode::Off => {}
+            ObjectiveReportMode::Brief => {
+                // Group by class: (count, sum_residual, sum_weighted, min_res, max_res)
+                let mut by_class: HashMap<String, (usize, f64, f64, Option<f64>, Option<f64>)> = HashMap::new();
+                for (name, _w, res, weighted) in &rows {
+                    let class = objective_class(name).to_string();
+                    let entry = by_class.entry(class).or_insert((0, 0.0, 0.0, None, None));
+                    entry.0 += 1;
+                    entry.1 += res;
+                    entry.2 += weighted;
+                    entry.3 = Some(entry.3.map_or(*res, |m| m.min(*res)));
+                    entry.4 = Some(entry.4.map_or(*res, |m| m.max(*res)));
+                }
+                let mut classes: Vec<_> = by_class.keys().collect();
+                classes.sort();
+                println!("--- Objective Report (brief, x_len={}) ---", x.len());
+                for class in classes {
+                    let (count, sum_res, sum_weighted, min_res, max_res) = &by_class[class];
+                    let mean_res = sum_res / *count as f64;
+                    let (min_s, max_s) = match (min_res, max_res) {
+                        (Some(a), Some(b)) => (format!("{:12.3e}", a), format!("{:12.3e}", b)),
+                        _ => ("N/A".into(), "N/A".into()),
+                    };
+                    println!("  {:30}  n={:3}  mean_res={:12.3e}  [min,max]=[{},{}]  weighted_sum={:12.3e}",
+                        class, count, mean_res, min_s, max_s, sum_weighted);
+                }
+                println!("  Total cost: {:12.3e}", total);
+                println!("---");
+            }
+            ObjectiveReportMode::Detailed => {
+                println!("--- Objective Report (detailed, x_len={}) ---", x.len());
+                for (i, (name, w, res, weighted)) in rows.iter().enumerate() {
+                    println!("  {:3}: {:45}  weight={:8.4}  residual={:12.3e}  (weighted={:12.3e})",
+                        i, name, w, res, weighted);
+                }
+                println!("  Total cost: {:12.3e}", total);
+                println!("---");
+            }
+        }
     }
 }

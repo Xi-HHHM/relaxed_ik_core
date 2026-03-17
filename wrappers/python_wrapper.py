@@ -32,6 +32,8 @@ lib.enable_shared_joint_penalty.argtypes = [ctypes.POINTER(RelaxedIKS), ctypes.c
 lib.enable_shared_joint_penalty.restype = None
 lib.enable_shared_joint_reduction.argtypes = [ctypes.POINTER(RelaxedIKS)]
 lib.enable_shared_joint_reduction.restype = None
+lib.set_objective_report_mode.argtypes = [ctypes.POINTER(RelaxedIKS), ctypes.c_int]
+lib.set_objective_report_mode.restype = None
 lib.validate_shared_joints.argtypes = [ctypes.POINTER(RelaxedIKS)]
 lib.validate_shared_joints.restype = Opt
 
@@ -128,6 +130,17 @@ class RelaxedIKRust:
         guaranteed to be identical after solving.
         '''
         lib.enable_shared_joint_reduction(self.obj)
+
+    def set_objective_report_mode(self, mode='off'):
+        '''
+        Set objective report verbosity after each solve.
+        mode: 'off' (default), 'brief', or 'detailed'
+          - off: no reports
+          - brief: one row per objective class
+          - detailed: one row per objective instance
+        '''
+        m = {'off': 0, 'brief': 1, 'detailed': 2}.get(mode.lower(), 0)
+        lib.set_objective_report_mode(self.obj, m)
 
     def validate_shared_joints(self):
         '''

@@ -12,12 +12,16 @@ Usage (from the project root, after `cargo build`):
   python examples/python_multi_goal_ik.py                           # default: configs/settings.yaml
   python examples/python_multi_goal_ik.py configs/example_settings/ur5.yaml
   python examples/python_multi_goal_ik.py configs/example_settings/baxter.yaml
+  
+  # Get the optimization report mode from the command line
+  python examples/python_multi_goal_ik.py --report_mode="brief"
 """
 
 import sys
 import os
 import math
 import yaml
+from argparse import ArgumentParser
 
 # ── locate & import the wrapper ──────────────────────────────────────────────
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -219,10 +223,30 @@ def solve_position_goals_demo(rik, settings):
 
 def main():
     # --- pick settings file ---
-    if len(sys.argv) > 1:
-        yaml_path = sys.argv[1]
-    else:
+    arg_parser = ArgumentParser()
+    arg_parser.add_argument(
+        "config",
+        nargs="?",
+        default=None,
+        help="Path to YAML file, or config name (e.g. agileone_upper for configs/example_settings/agileone_upper.yaml)"
+    )
+    arg_parser.add_argument(
+        "--report_mode",
+        type=str,
+        choices=["off", "brief", "detailed"],
+        default="off",
+        help="Objective report verbosity after each solve"
+    )
+    args = arg_parser.parse_args()
+
+    if args.config is None:
         yaml_path = os.path.join(project_root, "configs", "settings.yaml")
+    elif "/" in args.config or args.config.endswith(".yaml"):
+        yaml_path = args.config
+    else:
+        yaml_path = os.path.join(project_root, "configs", "example_settings", args.config + ".yaml")
+
+    optimization_report_mode = args.report_mode
 
     if not os.path.isabs(yaml_path):
         yaml_path = os.path.abspath(yaml_path)
@@ -232,6 +256,7 @@ def main():
 
     # --- create solver ---
     rik = RelaxedIKRust(yaml_path)
+    rik.set_objective_report_mode(optimization_report_mode)
 
     # --- shared joint setup (call BEFORE solving) ---
     if rik.has_shared_joints():

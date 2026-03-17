@@ -43,6 +43,7 @@ pub fn swamp_groove_loss_derivative(x_val: f64, g:f64, l_bound: f64, u_bound: f6
 }
 
 pub trait ObjectiveTrait {
+    fn name(&self) -> String;
     fn call(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64;
     fn call_lite(&self, x: &[f64], v: &vars::RelaxedIKVars, ee_poses: &Vec<(nalgebra::Vector3<f64>, nalgebra::UnitQuaternion<f64>)>) -> f64;
     fn gradient(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> (f64, Vec<f64>) {
@@ -85,6 +86,9 @@ impl MatchEEPosiDoF {
     pub fn new(arm_idx: usize, axis: usize) -> Self {Self{arm_idx, axis}}
 }
 impl ObjectiveTrait for MatchEEPosiDoF {
+    fn name(&self) -> String {
+        format!("MatchEEPosiDoF[arm={},axis={}]", self.arm_idx, self.axis)
+    }
     fn call(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
         let last_elem = frames[self.arm_idx].0.len() - 1;
         let goal_quat = v.goal_quats[self.arm_idx];
@@ -120,6 +124,9 @@ impl MatchEERotaDoF {
     pub fn new(arm_idx: usize, axis: usize) -> Self {Self{arm_idx, axis}}
 }
 impl ObjectiveTrait for MatchEERotaDoF {
+    fn name(&self) -> String {
+        format!("MatchEERotaDoF[arm={},axis={}]", self.arm_idx, self.axis)
+    }
     fn call(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
         let last_elem = frames[self.arm_idx].1.len() - 1;
         let ee_quat = frames[self.arm_idx].1[last_elem];
@@ -164,6 +171,9 @@ impl SelfCollision {
     pub fn new(arm_idx: usize, first_link: usize, second_link: usize) -> Self {Self{arm_idx, first_link, second_link}}
 }
 impl ObjectiveTrait for SelfCollision {
+    fn name(&self) -> String {
+        format!("SelfCollision[arm={},links={}-{}]", self.arm_idx, self.first_link, self.second_link)
+    }
     fn call(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
         for i in 0..x.len() {
             if (x[i].is_nan()) {
@@ -256,6 +266,7 @@ impl ObjectiveTrait for SelfCollision {
 
 pub struct MaximizeManipulability;
 impl ObjectiveTrait for MaximizeManipulability {
+    fn name(&self) -> String { "MaximizeManipulability".to_string() }
     fn call(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
         let x_val = v.robot.get_manipulability_immutable(&x);
         groove_loss(x_val, 1.0, 2, 0.5, 0.1, 2)
@@ -272,6 +283,9 @@ impl EachJointLimits {
     pub fn new(joint_idx: usize) -> Self {Self{joint_idx}}
 }
 impl ObjectiveTrait for EachJointLimits {
+    fn name(&self) -> String {
+        format!("EachJointLimits[joint={}]", self.joint_idx)
+    }
     fn call(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
     
         if v.robot.lower_joint_limits[self.joint_idx] == -999.0 && v.robot.upper_joint_limits[self.joint_idx] == 999.0 {
@@ -289,6 +303,7 @@ impl ObjectiveTrait for EachJointLimits {
 
 pub struct MinimizeVelocity;
 impl ObjectiveTrait for MinimizeVelocity {
+    fn name(&self) -> String { "MinimizeVelocity".to_string() }
     fn call(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
         let mut x_val = 0.0;
         for i in 0..x.len() {
@@ -310,6 +325,7 @@ impl ObjectiveTrait for MinimizeVelocity {
 
 pub struct MinimizeAcceleration;
 impl ObjectiveTrait for MinimizeAcceleration {
+    fn name(&self) -> String { "MinimizeAcceleration".to_string() }
     fn call(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
         let mut x_val = 0.0;
         for i in 0..x.len() {
@@ -335,6 +351,7 @@ impl ObjectiveTrait for MinimizeAcceleration {
 
 pub struct MinimizeJerk;
 impl ObjectiveTrait for MinimizeJerk {
+    fn name(&self) -> String { "MinimizeJerk".to_string() }
     fn call(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
         let mut x_val = 0.0;
         for i in 0..x.len() {
@@ -372,6 +389,7 @@ impl MatchEEPosGoals {
     pub fn new(arm_idx: usize) -> Self {Self{arm_idx}}
 }
 impl ObjectiveTrait for MatchEEPosGoals {
+    fn name(&self) -> String { format!("MatchEEPosGoals[arm={}]", self.arm_idx) }
     fn call(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
         let last_elem = frames[self.arm_idx].0.len() - 1;
         let x_val = ( frames[self.arm_idx].0[last_elem] - v.goal_positions[self.arm_idx] ).norm();
@@ -393,6 +411,7 @@ impl MatchEEQuatGoals {
     pub fn new(arm_idx: usize) -> Self {Self{arm_idx}}
 }
 impl ObjectiveTrait for MatchEEQuatGoals {
+    fn name(&self) -> String { format!("MatchEEQuatGoals[arm={}]", self.arm_idx) }
     fn call(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
         let last_elem = frames[self.arm_idx].1.len() - 1;
         let tmp = Quaternion::new(-frames[self.arm_idx].1[last_elem].w, -frames[self.arm_idx].1[last_elem].i, -frames[self.arm_idx].1[last_elem].j, -frames[self.arm_idx].1[last_elem].k);
@@ -435,6 +454,7 @@ impl SharedJointAlignment {
     }
 }
 impl ObjectiveTrait for SharedJointAlignment {
+    fn name(&self) -> String { format!("SharedJointAlignment[{}-{}]", self.idx_a, self.idx_b) }
     fn call(&self, x: &[f64], _v: &vars::RelaxedIKVars,
             _frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
         self.weight * (x[self.idx_a] - x[self.idx_b]).powi(2)

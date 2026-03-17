@@ -1,4 +1,4 @@
-use crate::relaxed_ik::{RelaxedIK, Opt};
+use crate::relaxed_ik::{RelaxedIK, Opt, ObjectiveReportMode};
 use std::sync::{Arc, Mutex};
 use nalgebra::{Vector3, Vector6, UnitQuaternion, Quaternion,Translation3, Isometry3};
 use std::os::raw::{*};
@@ -215,6 +215,21 @@ pub unsafe extern "C" fn enable_shared_joint_penalty(ptr: *mut RelaxedIK, weight
         &mut *ptr
     };
     relaxed_ik.enable_shared_joint_penalty(weight);
+}
+
+/// Set objective report mode: 0=Off, 1=Brief, 2=Detailed.
+#[no_mangle]
+pub unsafe extern "C" fn set_objective_report_mode(ptr: *mut RelaxedIK, mode: c_int) {
+    let relaxed_ik = unsafe {
+        assert!(!ptr.is_null());
+        &mut *ptr
+    };
+    let m = match mode {
+        1 => ObjectiveReportMode::Brief,
+        2 => ObjectiveReportMode::Detailed,
+        _ => ObjectiveReportMode::Off,
+    };
+    relaxed_ik.set_objective_report_mode(m);
 }
 
 /// Approach 2.2: Enable variable-reduction shared joint handling.

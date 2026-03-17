@@ -1,6 +1,7 @@
 use crate::groove::vars::RelaxedIKVars;
 use crate::groove::groove::{OptimizationEngineOpen};
 use crate::groove::objective_master::ObjectiveMaster;
+pub use crate::groove::objective_master::ObjectiveReportMode;
 use crate::groove::objective::SharedJointAlignment;
 use crate::utils_rust::file_utils::{*};
 use crate::utils_rust::transformations::{*};
@@ -29,6 +30,7 @@ pub struct RelaxedIK {
     pub groove: OptimizationEngineOpen,
     pub shared_joint_mode: SharedJointMode,
     groove_reduced: Option<OptimizationEngineOpen>,
+    report_mode: ObjectiveReportMode,
 }
 
 impl RelaxedIK {
@@ -40,7 +42,7 @@ impl RelaxedIK {
 
         let groove = OptimizationEngineOpen::new(vars.robot.num_dofs.clone());
 
-        Self{vars, om, groove, shared_joint_mode: SharedJointMode::None, groove_reduced: None}
+        Self{vars, om, groove, shared_joint_mode: SharedJointMode::None, groove_reduced: None, report_mode: ObjectiveReportMode::Off}
     }
 
     /// Approach 2.1: Add penalty objectives that force shared joint variables to match.
@@ -70,6 +72,11 @@ impl RelaxedIK {
             self.vars.robot.num_dofs, self.vars.robot.num_unique_dofs);
     }
 
+    /// Set objective report verbosity: Off (default), Brief (one row per class), Detailed.
+    pub fn set_objective_report_mode(&mut self, mode: ObjectiveReportMode) {
+        self.report_mode = mode;
+    }
+
     pub fn reset(&mut self, x: Vec<f64>) {
         self.vars.reset( x.clone());
     }
@@ -97,6 +104,7 @@ impl RelaxedIK {
             }
         }
         self.vars.update(out_x.clone());
+        self.om.print_objective_report(&out_x, &self.vars, self.report_mode);
         out_x
     }
 
@@ -116,6 +124,7 @@ impl RelaxedIK {
             }
         }
         self.vars.update(out_x.clone());
+        self.om.print_objective_report(&out_x, &self.vars, self.report_mode);
         out_x
     }
 
