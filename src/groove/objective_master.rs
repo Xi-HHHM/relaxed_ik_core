@@ -18,6 +18,68 @@ fn objective_class(name: &str) -> &str {
     name.split('[').next().unwrap_or(name).trim()
 }
 
+/// Default weights for relaxed_ik objectives. Used when not overridden by YAML or API.
+pub const DEFAULT_MATCH_EE_POSI_DOF: f64 = 50.0;
+pub const DEFAULT_MATCH_EE_ROTA_DOF: f64 = 10.0;
+pub const DEFAULT_EACH_JOINT_LIMITS: f64 = 0.1;
+pub const DEFAULT_MINIMIZE_VELOCITY: f64 = 0.7;
+pub const DEFAULT_MINIMIZE_ACCELERATION: f64 = 0.5;
+pub const DEFAULT_MINIMIZE_JERK: f64 = 0.3;
+pub const DEFAULT_MAXIMIZE_MANIPULABILITY: f64 = 1.0;
+pub const DEFAULT_SELF_COLLISION: f64 = 0.01;
+
+/// Configurable objective weights. Keys: MatchEEPosiDoF, MatchEERotaDoF, EachJointLimits,
+/// MinimizeVelocity, MinimizeAcceleration, MinimizeJerk, MaximizeManipulability, SelfCollision.
+#[derive(Clone, Default)]
+pub struct ObjectiveWeightsConfig {
+    pub overrides: HashMap<String, f64>,
+}
+
+impl ObjectiveWeightsConfig {
+    pub fn new() -> Self { Self::default() }
+
+    pub fn set(&mut self, class: &str, weight: f64) {
+        self.overrides.insert(class.to_string(), weight);
+    }
+
+    pub fn get(&self, class: &str) -> f64 {
+        self.overrides.get(class).copied().unwrap_or_else(|| match class {
+            "MatchEEPosiDoF" => DEFAULT_MATCH_EE_POSI_DOF,
+            "MatchEERotaDoF" => DEFAULT_MATCH_EE_ROTA_DOF,
+            "EachJointLimits" => DEFAULT_EACH_JOINT_LIMITS,
+            "MinimizeVelocity" => DEFAULT_MINIMIZE_VELOCITY,
+            "MinimizeAcceleration" => DEFAULT_MINIMIZE_ACCELERATION,
+            "MinimizeJerk" => DEFAULT_MINIMIZE_JERK,
+            "MaximizeManipulability" => DEFAULT_MAXIMIZE_MANIPULABILITY,
+            "SelfCollision" => DEFAULT_SELF_COLLISION,
+            _ => 0.1, // fallback for unknown
+        })
+    }
+
+    /// Parse from YAML settings. Expects optional "objective_weights" map with snake_case keys.
+    pub fn from_yaml(settings: &yaml_rust::Yaml) -> Option<Self> {
+        let w = settings["objective_weights"].as_hash()?;
+        let mut overrides = HashMap::new();
+        for (k, v) in w {
+            let key = k.as_str()?;
+            let val = v.as_f64()?;
+            let class = match key {
+                "match_ee_posi_dof" => "MatchEEPosiDoF",
+                "match_ee_rota_dof" => "MatchEERotaDoF",
+                "each_joint_limits" => "EachJointLimits",
+                "minimize_velocity" => "MinimizeVelocity",
+                "minimize_acceleration" => "MinimizeAcceleration",
+                "minimize_jerk" => "MinimizeJerk",
+                "maximize_manipulability" => "MaximizeManipulability",
+                "self_collision" => "SelfCollision",
+                _ => continue,
+            };
+            overrides.insert(class.to_string(), val);
+        }
+        if overrides.is_empty() { None } else { Some(Self { overrides }) }
+    }
+}
+
 pub struct ObjectiveMaster {
     pub objectives: Vec<Box<dyn ObjectiveTrait + Send>>,
     pub num_chains: usize,
@@ -40,47 +102,69 @@ impl ObjectiveMaster {
     }
 
 
-    pub fn relaxed_ik(chain_lengths: &[usize]) -> Self {
+    pub fn relaxed_ik(chain_lengths: &[usize], weights: Option<&ObjectiveWeightsConfig>) -> Self {
+        let get_w = |class: &str| weights.map_or_else(
+            || ObjectiveWeightsConfig::default().get(class),
+            |c| c.get(class)
+        );
+
         let mut objectives: Vec<Box<dyn ObjectiveTrait + Send>> = Vec::new();
         let mut weight_priors: Vec<f64> = Vec::new();
         let num_chains = chain_lengths.len();
         let mut num_dofs = 0;
         for i in 0..num_chains {
+            let wp = get_w("MatchEEPosiDoF");
             objectives.push(Box::new(MatchEEPosiDoF::new(i, 0)));
-            weight_priors.push(50.0);
+            weight_priors.push(wp);
             objectives.push(Box::new(MatchEEPosiDoF::new(i, 1)));
-            weight_priors.push(50.0);
+            weight_priors.push(wp);
             objectives.push(Box::new(MatchEEPosiDoF::new(i, 2)));
-            weight_priors.push(50.0);
+            weight_priors.push(wp);
+            let wr = get_w("MatchEERotaDoF");
             objectives.push(Box::new(MatchEERotaDoF::new(i, 0)));
-            weight_priors.push(10.0);
+            weight_priors.push(wr);
             objectives.push(Box::new(MatchEERotaDoF::new(i, 1)));
-            weight_priors.push(10.0);
+            weight_priors.push(wr);
             objectives.push(Box::new(MatchEERotaDoF::new(i, 2)));
-            weight_priors.push(10.0);
-            // objectives.push(Box::new(EnvCollision::new(i)));
-            // weight_priors.push(1.0);
+            weight_priors.push(wr);
             num_dofs += chain_lengths[i];
         }
 
+        let wj = get_w("EachJointLimits");
         for j in 0..num_dofs {
-            objectives.push(Box::new(EachJointLimits::new(j))); weight_priors.push(0.1 );
+            objectives.push(Box::new(EachJointLimits::new(j)));
+            weight_priors.push(wj);
         }
 
-        objectives.push(Box::new(MinimizeVelocity));   weight_priors.push(0.7);
-        objectives.push(Box::new(MinimizeAcceleration));    weight_priors.push(0.5);
-        objectives.push(Box::new(MinimizeJerk));    weight_priors.push(0.3);
-        objectives.push(Box::new(MaximizeManipulability));    weight_priors.push(1.0);
+        objectives.push(Box::new(MinimizeVelocity));
+        weight_priors.push(get_w("MinimizeVelocity"));
+        objectives.push(Box::new(MinimizeAcceleration));
+        weight_priors.push(get_w("MinimizeAcceleration"));
+        objectives.push(Box::new(MinimizeJerk));
+        weight_priors.push(get_w("MinimizeJerk"));
+        objectives.push(Box::new(MaximizeManipulability));
+        weight_priors.push(get_w("MaximizeManipulability"));
 
+        let wsc = get_w("SelfCollision");
         for i in 0..num_chains {
             for j in 0..chain_lengths[i]-2 {
                 for k in j+2..chain_lengths[i] {
-                    objectives.push(Box::new(SelfCollision::new(0, j, k))); weight_priors.push(0.01 );
+                    objectives.push(Box::new(SelfCollision::new(0, j, k)));
+                    weight_priors.push(wsc);
                 }
             }
         }
-        
+
         Self{objectives, num_chains, weight_priors, lite: false, finite_diff_grad: false}
+    }
+
+    /// Set weight for all objectives of a given class (e.g. "MinimizeVelocity", "SelfCollision").
+    pub fn set_objective_weight(&mut self, class: &str, weight: f64) {
+        for i in 0..self.objectives.len() {
+            if objective_class(&self.objectives[i].name()) == class {
+                self.weight_priors[i] = weight;
+            }
+        }
     }
 
     pub fn call(&self, x: &[f64], vars: &RelaxedIKVars) -> f64 {

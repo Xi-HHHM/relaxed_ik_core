@@ -34,6 +34,8 @@ lib.enable_shared_joint_reduction.argtypes = [ctypes.POINTER(RelaxedIKS)]
 lib.enable_shared_joint_reduction.restype = None
 lib.set_objective_report_mode.argtypes = [ctypes.POINTER(RelaxedIKS), ctypes.c_int]
 lib.set_objective_report_mode.restype = None
+lib.set_objective_weight.argtypes = [ctypes.POINTER(RelaxedIKS), ctypes.c_char_p, ctypes.c_double]
+lib.set_objective_weight.restype = None
 lib.validate_shared_joints.argtypes = [ctypes.POINTER(RelaxedIKS)]
 lib.validate_shared_joints.restype = Opt
 
@@ -141,6 +143,16 @@ class RelaxedIKRust:
         '''
         m = {'off': 0, 'brief': 1, 'detailed': 2}.get(mode.lower(), 0)
         lib.set_objective_report_mode(self.obj, m)
+
+    def set_objective_weight(self, class_name, weight):
+        '''
+        Set weight for all objectives of a given class.
+        class_name: one of MatchEEPosiDoF, MatchEERotaDoF, EachJointLimits,
+                    MinimizeVelocity, MinimizeAcceleration, MinimizeJerk,
+                    MaximizeManipulability, SelfCollision
+        weight (float): the weight to use
+        '''
+        lib.set_objective_weight(self.obj, class_name.encode('utf-8'), weight)
 
     def validate_shared_joints(self):
         '''

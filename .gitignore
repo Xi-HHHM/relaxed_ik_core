@@ -13,4 +13,5 @@ Cargo.lock
 wrappers/__pycache__/
 
 # webassembly files
-/pkg/
+/pkg/config
+configs

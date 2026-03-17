@@ -217,6 +217,20 @@ pub unsafe extern "C" fn enable_shared_joint_penalty(ptr: *mut RelaxedIK, weight
     relaxed_ik.enable_shared_joint_penalty(weight);
 }
 
+/// Set weight for an objective class. Class names: MatchEEPosiDoF, MatchEERotaDoF,
+/// EachJointLimits, MinimizeVelocity, MinimizeAcceleration, MinimizeJerk,
+/// MaximizeManipulability, SelfCollision.
+#[no_mangle]
+pub unsafe extern "C" fn set_objective_weight(ptr: *mut RelaxedIK, class: *const c_char, weight: c_double) {
+    let relaxed_ik = unsafe {
+        assert!(!ptr.is_null());
+        &mut *ptr
+    };
+    if class.is_null() { return }
+    let class_str = std::ffi::CStr::from_ptr(class).to_str().unwrap_or("");
+    relaxed_ik.set_objective_weight(class_str, weight);
+}
+
 /// Set objective report mode: 0=Off, 1=Brief, 2=Detailed.
 #[no_mangle]
 pub unsafe extern "C" fn set_objective_report_mode(ptr: *mut RelaxedIK, mode: c_int) {

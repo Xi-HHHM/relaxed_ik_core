@@ -1,9 +1,12 @@
 use crate::groove::vars::RelaxedIKVars;
 use crate::groove::groove::{OptimizationEngineOpen};
-use crate::groove::objective_master::ObjectiveMaster;
+use crate::groove::objective_master::{ObjectiveMaster, ObjectiveWeightsConfig};
 pub use crate::groove::objective_master::ObjectiveReportMode;
 use crate::groove::objective::SharedJointAlignment;
 use crate::utils_rust::file_utils::{*};
+use std::fs::File;
+use std::io::Read;
+use yaml_rust::YamlLoader;
 use crate::utils_rust::transformations::{*};
 use nalgebra::{Vector3, UnitQuaternion, Quaternion};
 use std::os::raw::{c_double, c_int};
@@ -34,11 +37,30 @@ pub struct RelaxedIK {
 }
 
 impl RelaxedIK {
-    pub fn load_settings( path_to_setting: &str) -> Self {
+    pub fn load_settings(path_to_setting: &str) -> Self {
         println!("RelaxedIK is using below setting file {}", path_to_setting);
 
         let vars = RelaxedIKVars::from_local_settings(path_to_setting);
-        let om = ObjectiveMaster::relaxed_ik(&vars.robot.chain_lengths);
+
+        let weights = {
+            let mut contents = String::new();
+            if let Ok(mut f) = File::open(path_to_setting) {
+                let _ = f.read_to_string(&mut contents);
+                if let Ok(docs) = YamlLoader::load_from_str(&contents) {
+                    if let Some(settings) = docs.first() {
+                        ObjectiveWeightsConfig::from_yaml(settings)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        let om = ObjectiveMaster::relaxed_ik(&vars.robot.chain_lengths, weights.as_ref());
 
         let groove = OptimizationEngineOpen::new(vars.robot.num_dofs.clone());
 
@@ -75,6 +97,13 @@ impl RelaxedIK {
     /// Set objective report verbosity: Off (default), Brief (one row per class), Detailed.
     pub fn set_objective_report_mode(&mut self, mode: ObjectiveReportMode) {
         self.report_mode = mode;
+    }
+
+    /// Set weight for all objectives of a given class. Class names:
+    /// MatchEEPosiDoF, MatchEERotaDoF, EachJointLimits, MinimizeVelocity,
+    /// MinimizeAcceleration, MinimizeJerk, MaximizeManipulability, SelfCollision.
+    pub fn set_objective_weight(&mut self, class: &str, weight: f64) {
+        self.om.set_objective_weight(class, weight);
     }
 
     pub fn reset(&mut self, x: Vec<f64>) {

@@ -258,6 +258,21 @@ def main():
     rik = RelaxedIKRust(yaml_path)
     rik.set_objective_report_mode(optimization_report_mode)
 
+    # --- optional: override objective weights (YAML objective_weights applied at load;
+    #     override any here for tuning)
+    
+    # objective_weights:
+    #   match_ee_posi_dof: 50.0
+    #   match_ee_rota_dof: 10.0
+    #   each_joint_limits: 0.1
+    #   minimize_velocity: 0.7
+    #   minimize_acceleration: 0.5
+    #   minimize_jerk: 0.3
+    #   maximize_manipulability: 1.0
+    #   self_collision: 0.01
+    
+    # rik.set_objective_weight("MinimizeVelocity", 0.8)  # example: slight override
+
     # --- shared joint setup (call BEFORE solving) ---
     if rik.has_shared_joints():
         pairs = rik.get_shared_joint_pairs()
