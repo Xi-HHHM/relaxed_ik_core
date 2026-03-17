@@ -32,8 +32,14 @@ lib.enable_shared_joint_penalty.argtypes = [ctypes.POINTER(RelaxedIKS), ctypes.c
 lib.enable_shared_joint_penalty.restype = None
 lib.enable_shared_joint_reduction.argtypes = [ctypes.POINTER(RelaxedIKS)]
 lib.enable_shared_joint_reduction.restype = None
+lib.enable_relative_tcp_constraints.argtypes = [ctypes.POINTER(RelaxedIKS), ctypes.c_double]
+lib.enable_relative_tcp_constraints.restype = None
 lib.set_objective_report_mode.argtypes = [ctypes.POINTER(RelaxedIKS), ctypes.c_int]
 lib.set_objective_report_mode.restype = None
+lib.set_max_iterations.argtypes = [ctypes.POINTER(RelaxedIKS), ctypes.c_int]
+lib.set_max_iterations.restype = None
+lib.get_max_iterations.argtypes = [ctypes.POINTER(RelaxedIKS)]
+lib.get_max_iterations.restype = ctypes.c_int
 lib.set_objective_weight.argtypes = [ctypes.POINTER(RelaxedIKS), ctypes.c_char_p, ctypes.c_double]
 lib.set_objective_weight.restype = None
 lib.validate_shared_joints.argtypes = [ctypes.POINTER(RelaxedIKS)]
@@ -133,6 +139,15 @@ class RelaxedIKRust:
         '''
         lib.enable_shared_joint_reduction(self.obj)
 
+    def enable_relative_tcp_constraints(self, weight=100.0):
+        '''
+        Keep end-effectors in the relative pose implied by current goals.
+        Useful when absolute goal tracking can be relaxed but the formation
+        (relative geometry between TCPs) must be maintained. Requires 2+ chains.
+        weight (float): objective weight (default 100). Tune vs MatchEEPosiDoF/MatchEERotaDoF.
+        '''
+        lib.enable_relative_tcp_constraints(self.obj, weight)
+
     def set_objective_report_mode(self, mode='off'):
         '''
         Set objective report verbosity after each solve.
@@ -144,12 +159,26 @@ class RelaxedIKRust:
         m = {'off': 0, 'brief': 1, 'detailed': 2}.get(mode.lower(), 0)
         lib.set_objective_report_mode(self.obj, m)
 
+    def set_max_iterations(self, max_iterations=100):
+        '''
+        Set optimizer iteration budget per solve call.
+        max_iterations (int): must be >= 1
+        '''
+        max_iterations = int(max_iterations)
+        if max_iterations < 1:
+            raise ValueError("max_iterations must be >= 1")
+        lib.set_max_iterations(self.obj, max_iterations)
+
+    def get_max_iterations(self):
+        '''Return current optimizer iteration budget per solve call.'''
+        return int(lib.get_max_iterations(self.obj))
+
     def set_objective_weight(self, class_name, weight):
         '''
         Set weight for all objectives of a given class.
         class_name: one of MatchEEPosiDoF, MatchEERotaDoF, EachJointLimits,
                     MinimizeVelocity, MinimizeAcceleration, MinimizeJerk,
-                    MaximizeManipulability, SelfCollision
+                    MaximizeManipulability, SelfCollision, RelativeTCPConstraint
         weight (float): the weight to use
         '''
         lib.set_objective_weight(self.obj, class_name.encode('utf-8'), weight)

@@ -246,6 +246,38 @@ pub unsafe extern "C" fn set_objective_report_mode(ptr: *mut RelaxedIK, mode: c_
     relaxed_ik.set_objective_report_mode(m);
 }
 
+/// Set optimizer iteration budget per solve call. Must be >= 1.
+#[no_mangle]
+pub unsafe extern "C" fn set_max_iterations(ptr: *mut RelaxedIK, max_iterations: c_int) {
+    let relaxed_ik = unsafe {
+        assert!(!ptr.is_null());
+        &mut *ptr
+    };
+    assert!(max_iterations >= 1, "max_iterations must be >= 1");
+    relaxed_ik.set_max_iterations(max_iterations as usize);
+}
+
+/// Get optimizer iteration budget per solve call.
+#[no_mangle]
+pub unsafe extern "C" fn get_max_iterations(ptr: *mut RelaxedIK) -> c_int {
+    let relaxed_ik = unsafe {
+        assert!(!ptr.is_null());
+        &*ptr
+    };
+    relaxed_ik.max_iterations() as c_int
+}
+
+/// Enable relative TCP constraints: keep end-effectors in the relative pose implied by
+/// current goals. Requires num_chains >= 2. Weight typically 50–200.
+#[no_mangle]
+pub unsafe extern "C" fn enable_relative_tcp_constraints(ptr: *mut RelaxedIK, weight: c_double) {
+    let relaxed_ik = unsafe {
+        assert!(!ptr.is_null());
+        &mut *ptr
+    };
+    relaxed_ik.enable_relative_tcp_constraints(weight);
+}
+
 /// Approach 2.2: Enable variable-reduction shared joint handling.
 #[no_mangle]
 pub unsafe extern "C" fn enable_shared_joint_reduction(ptr: *mut RelaxedIK) {

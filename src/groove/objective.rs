@@ -439,10 +439,10 @@ impl ObjectiveTrait for MatchEEQuatGoals {
 /// Penalizes the difference between two optimization variables that should be equal.
 /// Used for approach 2.1: forcing shared joints across chains to stay aligned.
 ///
-/// Cost = `weight * (x[a] - x[b])^2`.  The `weight` is stored on the struct
-/// and set directly from the user-facing API — no hidden internal multiplier.
-/// `weight_priors` in ObjectiveMaster is set to 1.0 so the user's weight is
-/// the sole control.
+/// Cost = `weight * groove_loss(diff, 0, ...)` where `diff = x[a] - x[b]`.
+/// Uses a groove near diff=0 to avoid over-penalizing small misalignments.
+/// `weight` scales the loss; groove params (d=2, c=0.1, f=10.0, g=2) follow
+/// the common pattern used by other objectives.
 pub struct SharedJointAlignment {
     pub idx_a: usize,
     pub idx_b: usize,
@@ -457,29 +457,86 @@ impl ObjectiveTrait for SharedJointAlignment {
     fn name(&self) -> String { format!("SharedJointAlignment[{}-{}]", self.idx_a, self.idx_b) }
     fn call(&self, x: &[f64], _v: &vars::RelaxedIKVars,
             _frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
-        self.weight * (x[self.idx_a] - x[self.idx_b]).powi(2)
+        let diff = x[self.idx_a] - x[self.idx_b];
+        self.weight * groove_loss(diff, 0.0, 2, 0.1, 10.0, 2)
     }
     fn call_lite(&self, x: &[f64], _v: &vars::RelaxedIKVars,
                  _ee_poses: &Vec<(nalgebra::Vector3<f64>, nalgebra::UnitQuaternion<f64>)>) -> f64 {
-        self.weight * (x[self.idx_a] - x[self.idx_b]).powi(2)
+        let diff = x[self.idx_a] - x[self.idx_b];
+        self.weight * groove_loss(diff, 0.0, 2, 0.1, 10.0, 2)
     }
     fn gradient(&self, x: &[f64], _v: &vars::RelaxedIKVars,
                 _frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> (f64, Vec<f64>) {
         let diff = x[self.idx_a] - x[self.idx_b];
-        let obj = self.weight * diff.powi(2);
+        let obj = self.weight * groove_loss(diff, 0.0, 2, 0.1, 10.0, 2);
+        let d_loss = groove_loss_derivative(diff, 0.0, 2, 0.1, 10.0, 2);
         let mut grad = vec![0.0; x.len()];
-        grad[self.idx_a] = self.weight * 2.0 * diff;
-        grad[self.idx_b] = self.weight * -2.0 * diff;
+        grad[self.idx_a] = self.weight * d_loss;
+        grad[self.idx_b] = self.weight * (-d_loss);
         (obj, grad)
     }
     fn gradient_lite(&self, x: &[f64], _v: &vars::RelaxedIKVars,
                      _ee_poses: &Vec<(nalgebra::Vector3<f64>, nalgebra::UnitQuaternion<f64>)>) -> (f64, Vec<f64>) {
         let diff = x[self.idx_a] - x[self.idx_b];
-        let obj = self.weight * diff.powi(2);
+        let obj = self.weight * groove_loss(diff, 0.0, 2, 0.1, 10.0, 2);
+        let d_loss = groove_loss_derivative(diff, 0.0, 2, 0.1, 10.0, 2);
         let mut grad = vec![0.0; x.len()];
-        grad[self.idx_a] = self.weight * 2.0 * diff;
-        grad[self.idx_b] = self.weight * -2.0 * diff;
+        grad[self.idx_a] = self.weight * d_loss;
+        grad[self.idx_b] = self.weight * (-d_loss);
         (obj, grad)
     }
     fn gradient_type(&self) -> usize { 0 }
+}
+
+
+/// Keeps TCPs in the desired relative pose to each other. Uses goal poses to define
+/// the desired formation; when enabled with high weight, the robot can be slightly off
+/// from absolute goal poses while still maintaining the relative geometry.
+///
+/// For pair (arm_a, arm_b): penalizes deviation of actual relative pose from the
+/// relative pose implied by goal_positions and goal_quats.
+pub struct RelativeTCPConstraint {
+    pub arm_a: usize,
+    pub arm_b: usize,
+}
+impl RelativeTCPConstraint {
+    pub fn new(arm_a: usize, arm_b: usize) -> Self { Self { arm_a, arm_b } }
+}
+impl ObjectiveTrait for RelativeTCPConstraint {
+    fn name(&self) -> String { format!("RelativeTCPConstraint[{}-{}]", self.arm_a, self.arm_b) }
+    fn call(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
+        let last_a = frames[self.arm_a].0.len() - 1;
+        let last_b = frames[self.arm_b].0.len() - 1;
+        let pos_a = frames[self.arm_a].0[last_a];
+        let pos_b = frames[self.arm_b].0[last_b];
+        let quat_a = frames[self.arm_a].1[last_a];
+        let quat_b = frames[self.arm_b].1[last_b];
+
+        let desired_offset = v.goal_positions[self.arm_b] - v.goal_positions[self.arm_a];
+        let actual_offset = pos_b - pos_a;
+        let pos_err = (actual_offset - desired_offset).norm();
+
+        let desired_rel_quat = v.goal_quats[self.arm_a].inverse() * v.goal_quats[self.arm_b];
+        let actual_rel_quat = quat_a.inverse() * quat_b;
+        let rot_err = angle_between_quaternion(actual_rel_quat, desired_rel_quat);
+
+        groove_loss(pos_err, 0.0, 2, 0.1, 10.0, 2) + groove_loss(rot_err, 0.0, 2, 0.1, 10.0, 2)
+    }
+    fn call_lite(&self, x: &[f64], v: &vars::RelaxedIKVars, ee_poses: &Vec<(nalgebra::Vector3<f64>, nalgebra::UnitQuaternion<f64>)>) -> f64 {
+        let pos_a = ee_poses[self.arm_a].0;
+        let pos_b = ee_poses[self.arm_b].0;
+        let quat_a = ee_poses[self.arm_a].1;
+        let quat_b = ee_poses[self.arm_b].1;
+
+        let desired_offset = v.goal_positions[self.arm_b] - v.goal_positions[self.arm_a];
+        let actual_offset = pos_b - pos_a;
+        let pos_err = (actual_offset - desired_offset).norm();
+
+        let desired_rel_quat = v.goal_quats[self.arm_a].inverse() * v.goal_quats[self.arm_b];
+        let actual_rel_quat = quat_a.inverse() * quat_b;
+        let rot_err = angle_between_quaternion(actual_rel_quat, desired_rel_quat);
+
+        groove_loss(pos_err, 0.0, 2, 0.1, 10.0, 2) + groove_loss(rot_err, 0.0, 2, 0.1, 10.0, 2)
+    }
+    fn gradient_type(&self) -> usize { 1 }  // finite diff (FK involved)
 }

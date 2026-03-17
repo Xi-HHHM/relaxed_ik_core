@@ -2,6 +2,20 @@ use crate::groove::objective::*;
 use crate::groove::vars::RelaxedIKVars;
 use std::collections::HashMap;
 
+/// Parse "RelativeTCPConstraint[a-b]" -> Some((a, b)) or None.
+fn parse_relative_tcp_indices(name: &str) -> Option<(usize, usize)> {
+    let prefix = "RelativeTCPConstraint[";
+    if !name.starts_with(prefix) {
+        return None;
+    }
+    let rest = &name[prefix.len()..];
+    let end = rest.find(']')?;
+    let middle = rest[..end].find('-')?;
+    let a: usize = rest[..middle].parse().ok()?;
+    let b: usize = rest[middle + 1..end].parse().ok()?;
+    Some((a, b))
+}
+
 /// Controls verbosity of objective reports after each solve.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ObjectiveReportMode {
@@ -27,6 +41,7 @@ pub const DEFAULT_MINIMIZE_ACCELERATION: f64 = 0.5;
 pub const DEFAULT_MINIMIZE_JERK: f64 = 0.3;
 pub const DEFAULT_MAXIMIZE_MANIPULABILITY: f64 = 1.0;
 pub const DEFAULT_SELF_COLLISION: f64 = 0.01;
+pub const DEFAULT_RELATIVE_TCP_CONSTRAINTS: f64 = 0.0;
 
 /// Configurable objective weights. Keys: MatchEEPosiDoF, MatchEERotaDoF, EachJointLimits,
 /// MinimizeVelocity, MinimizeAcceleration, MinimizeJerk, MaximizeManipulability, SelfCollision.
@@ -52,6 +67,7 @@ impl ObjectiveWeightsConfig {
             "MinimizeJerk" => DEFAULT_MINIMIZE_JERK,
             "MaximizeManipulability" => DEFAULT_MAXIMIZE_MANIPULABILITY,
             "SelfCollision" => DEFAULT_SELF_COLLISION,
+            "RelativeTCPConstraint" => DEFAULT_RELATIVE_TCP_CONSTRAINTS,
             _ => 0.1, // fallback for unknown
         })
     }
@@ -72,6 +88,7 @@ impl ObjectiveWeightsConfig {
                 "minimize_jerk" => "MinimizeJerk",
                 "maximize_manipulability" => "MaximizeManipulability",
                 "self_collision" => "SelfCollision",
+                "relative_tcp_constraints" => "RelativeTCPConstraint",
                 _ => continue,
             };
             overrides.insert(class.to_string(), val);
@@ -322,7 +339,7 @@ impl ObjectiveMaster {
     }
 
     /// Print objectives, weights, and residuals based on the given report mode.
-    pub fn print_objective_report(&self, x: &[f64], vars: &RelaxedIKVars, mode: ObjectiveReportMode) {
+    pub fn print_objective_report(&self, x: &[f64], vars: &RelaxedIKVars, mode: ObjectiveReportMode, max_iterations: usize) {
         if mode == ObjectiveReportMode::Off {
             return;
         }
@@ -362,7 +379,7 @@ impl ObjectiveMaster {
                 }
                 let mut classes: Vec<_> = by_class.keys().collect();
                 classes.sort();
-                println!("--- Objective Report (brief, x_len={}) ---", x.len());
+                println!("--- Objective Report (brief, x_len={}, max_iterations={}) ---", x.len(), max_iterations);
                 for class in classes {
                     let (count, sum_res, sum_weighted, min_res, max_res) = &by_class[class];
                     let mean_res = sum_res / *count as f64;
@@ -374,15 +391,35 @@ impl ObjectiveMaster {
                         class, count, mean_res, min_s, max_s, sum_weighted);
                 }
                 println!("  Total cost: {:12.3e}", total);
+                println!("  (lower is better: negative = near goals, positive = constraint violations or large tracking errors)");
                 println!("---");
             }
             ObjectiveReportMode::Detailed => {
-                println!("--- Objective Report (detailed, x_len={}) ---", x.len());
+                println!("--- Objective Report (detailed, x_len={}, max_iterations={}) ---", x.len(), max_iterations);
+                let ee_poses = vars.robot.get_ee_pos_and_quat_immutable(x);
                 for (i, (name, w, res, weighted)) in rows.iter().enumerate() {
                     println!("  {:3}: {:45}  weight={:8.4}  residual={:12.3e}  (weighted={:12.3e})",
                         i, name, w, res, weighted);
+                    if let Some((a, b)) = parse_relative_tcp_indices(name) {
+                        if a < vars.goal_positions.len() && b < vars.goal_positions.len()
+                            && a < ee_poses.len() && b < ee_poses.len() {
+                            let desired_xyz = vars.goal_positions[b] - vars.goal_positions[a];
+                            let actual_xyz = ee_poses[b].0 - ee_poses[a].0;
+                            let desired_quat = vars.goal_quats[a].inverse() * vars.goal_quats[b];
+                            let actual_quat = ee_poses[a].1.inverse() * ee_poses[b].1;
+                            let q = desired_quat.quaternion();
+                            let qa = actual_quat.quaternion();
+                            println!("       desired: xyz=[{:.6}, {:.6}, {:.6}]  quat_xyzw=[{:.6}, {:.6}, {:.6}, {:.6}]",
+                                desired_xyz.x, desired_xyz.y, desired_xyz.z,
+                                q.i, q.j, q.k, q.w);
+                            println!("       actual:  xyz=[{:.6}, {:.6}, {:.6}]  quat_xyzw=[{:.6}, {:.6}, {:.6}, {:.6}]",
+                                actual_xyz.x, actual_xyz.y, actual_xyz.z,
+                                qa.i, qa.j, qa.k, qa.w);
+                        }
+                    }
                 }
                 println!("  Total cost: {:12.3e}", total);
+                println!("  (lower is better: negative = near goals, positive = constraint violations or large tracking errors)");
                 println!("---");
             }
         }

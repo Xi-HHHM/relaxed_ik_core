@@ -221,6 +221,69 @@ def solve_position_goals_demo(rik, settings):
             print(f"    [{tag}] x[{a}]={val_a} vs x[{b}]={val_b}, diff={d:.2e}")
 
 
+def solve_position_goals_with_constraints_demo(rik, settings):
+    """
+    Absolute-position demo: give explicit (position, orientation) goals and
+    solve with solve_position.  Useful when you have target frames from a
+    planner or teleoperation.
+    """
+    num_chains = settings["num_chains"]
+    print(f"\n--- Absolute position IK for {num_chains} chain(s) ---")
+
+    rik.reset(settings["starting_config"])
+
+    # We'll do a few solves, each time shifting the position goal slightly.
+    # Starting goal = initial EE pose (which we approximate by solving once
+    # with zero tolerance and a very small perturbation).
+
+    # First, warm up: solve with a tiny velocity to establish internal state.
+    lin_vel = [0.0] * (3 * num_chains)
+    ang_vel = [0.0] * (3 * num_chains)
+    tol = [0.0] * (6 * num_chains)
+    rik.solve_velocity(lin_vel, ang_vel, tol)
+
+    # Now build a sequence of absolute Cartesian goals.
+    # We'll shift the goal 1 cm in +x per step for each chain.
+    base_positions = []
+    base_quats = []
+    for c in range(num_chains):
+        # Approximate "current" EE pose — in a real pipeline you'd get this
+        # from FK or a TF lookup.  Here we use a nominal pose per robot.
+        base_positions.append([0.5, 0.0, 0.5])       # rough starting guess
+        base_quats.append(identity_quat())
+
+    # Each item: [x, y, z, qx, qy, qz, qw]
+    # Order must match ee_links in your YAML.
+    hardcoded_goals = [
+       [0.450209819665275, 0.08591020557133631, 0.3375920623896913, -0.5371653057300836, 0.32248598672089074, -0.2029928362203923, 0.7524959342958342],
+       [0.16283832706299817, -0.4232740839676744, 0.33929487148425674, 0.6272233436246901, 0.022778348201935656, -0.1825267387333295, 0.7503172217329875],
+    ]
+
+    positions_flat = []
+    quats_flat = []
+    tol_flat = []
+
+    for c in range(len(hardcoded_goals)):
+        positions_flat.extend(hardcoded_goals[c][:3])
+        quats_flat.extend(hardcoded_goals[c][3:])
+        tol_flat.extend([0.0] * 6)
+
+
+    print(f"  \n\nSolving position goals with constraints")
+    rik.enable_relative_tcp_constraints(0.0)
+    solution = rik.solve_position(positions_flat, quats_flat, tol_flat)
+    joints = [round(solution[i], 4) for i in range(len(solution))]
+    print(f"  joints={joints}")
+
+    print(f"  \n\nRelative TCP constraints enabled")
+
+    rik.enable_relative_tcp_constraints(1000.0)
+    solution = rik.solve_position(positions_flat, quats_flat, tol_flat)
+    joints = [round(solution[i], 4) for i in range(len(solution))]
+    print(f"  joints={joints}")
+
+
+
 def main():
     # --- pick settings file ---
     arg_parser = ArgumentParser()
@@ -237,6 +300,12 @@ def main():
         default="off",
         help="Objective report verbosity after each solve"
     )
+    arg_parser.add_argument(
+        "--iterations",
+        type=int,
+        default=100,
+        help="Optimizer max iterations per solve (must be >= 1)"
+    )
     args = arg_parser.parse_args()
 
     if args.config is None:
@@ -247,6 +316,10 @@ def main():
         yaml_path = os.path.join(project_root, "configs", "example_settings", args.config + ".yaml")
 
     optimization_report_mode = args.report_mode
+    optimization_iterations = args.iterations
+
+    if optimization_iterations < 1:
+        raise ValueError("--iterations must be >= 1")
 
     if not os.path.isabs(yaml_path):
         yaml_path = os.path.abspath(yaml_path)
@@ -257,6 +330,8 @@ def main():
     # --- create solver ---
     rik = RelaxedIKRust(yaml_path)
     rik.set_objective_report_mode(optimization_report_mode)
+    rik.set_max_iterations(optimization_iterations)
+    print(f"Optimizer max iterations: {rik.get_max_iterations()}")
 
     # --- optional: override objective weights (YAML objective_weights applied at load;
     #     override any here for tuning)
@@ -270,8 +345,11 @@ def main():
     #   minimize_jerk: 0.3
     #   maximize_manipulability: 1.0
     #   self_collision: 0.01
-    
+    #   relative_tcp_constraint: 100.0
+
     # rik.set_objective_weight("MinimizeVelocity", 0.8)  # example: slight override
+    rik.set_objective_weight("MinimizeJerk", 0.01)
+    rik.set_objective_weight("MinimizeAcceleration", 0.1)
 
     # --- shared joint setup (call BEFORE solving) ---
     if rik.has_shared_joints():
@@ -287,7 +365,8 @@ def main():
     # --- demos ---
     # solve_single_chain_demo(rik, settings)
     # solve_multi_chain_demo(rik, settings)
-    solve_position_goals_demo(rik, settings)
+    # solve_position_goals_demo(rik, settings)
+    solve_position_goals_with_constraints_demo(rik, settings)
 
     print("\nDone.")
 
